@@ -59,6 +59,7 @@ import { normalizeMessagesForUser } from '../../../utils/server/lib/normalizeMes
 import { API } from '../api';
 import { getPaginationItems } from '../helpers/getPaginationItems';
 import { findDiscussionsFromRoom, findMentionedMessages, findStarredMessages } from '../lib/messages';
+import { ScheduledMessages } from '/server/models/ScheduledMessages';
 
 API.v1.addRoute(
 	'chat.delete',
@@ -845,3 +846,70 @@ API.v1.addRoute(
 		},
 	},
 );
+
+API.v1.addRoute('chat.scheduleMessage', { authRequired: true }, {
+	async post() {
+	  const { value, scheduledAt, rid, tmid } = this.bodyParams;
+  
+	  if (!value || !scheduledAt || !rid) {
+		return API.v1.failure('value, scheduledAt, and rid are required');
+	  }
+  
+	  // Validate the room ID and user
+	  if (!this.userId || !rid) {
+		return API.v1.unauthorized();
+	  }
+  
+	  // Fetch the user asynchronously
+	  const user = await Users.findOneById(this.userId, {
+		projection: { username: 1, type: 1 },
+	  });
+	  if (!user) {
+		return API.v1.failure('User not found');
+	  }
+  
+	  // Validate message size
+	  const maxAllowedSize = settings.get<number>('Message_MaxAllowedSize') ?? 0;
+	  if (value.length > maxAllowedSize) {
+		return API.v1.failure('error-message-size-exceeded', 'Message size exceeds Message_MaxAllowedSize');
+	  }
+  
+	  // Validate thread
+	  if (tmid && !settings.get('Threads_enabled')) {
+		return API.v1.failure('error-not-allowed', 'Threads are disabled');
+	  }
+  
+	  // Validate room access
+	  try {
+		await canSendMessageAsync(rid, { uid: this.userId, username: user.username, type: user.type });
+	  } catch (error) {
+		return API.v1.failure('error-not-allowed', 'Not allowed to send messages in this room');
+	  }
+  
+	  // Construct the scheduled message object
+	  const scheduledMessage = {
+		t: 'scheduled_message',
+		rid,
+		msg: value,
+		u: { _id: this.userId, username: user.username || 'unknown' },
+		ts: new Date(),
+		scheduledAt: new Date(scheduledAt),
+		tmid,
+		_updatedAt: new Date(),
+	  };
+  
+	  // Insert the message into the ScheduledMessages collection
+	  try {
+		const scheduledMessageId = await ScheduledMessages.insertAsync(scheduledMessage); // Use insertAsync
+		const createdScheduledMessage = await ScheduledMessages.findOneAsync({ _id: scheduledMessageId }); // Use findOneAsync
+		if (!createdScheduledMessage) {
+		  console.error('Failed to find scheduled message after insertion:', scheduledMessageId);
+		  return API.v1.failure('Scheduled message created but could not be retrieved');
+		}
+		return API.v1.success({ message: createdScheduledMessage });
+	  } catch (error) {
+		console.error('Error creating scheduled message:', error);
+		return API.v1.failure(`Failed to schedule message: ${error.message}`);
+	  }
+	},
+  });

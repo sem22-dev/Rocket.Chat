@@ -32685,6 +32685,7 @@ __metadata:
     "@types/js-yaml": "npm:^4.0.9"
     "@types/stream-buffers": "npm:^3.0.7"
     node-gyp: "npm:^10.2.0"
+    swagger-ui-express: "npm:^5.0.1"
     ts-node: "npm:^10.9.2"
     turbo: "npm:^2.3.4"
   languageName: unknown
