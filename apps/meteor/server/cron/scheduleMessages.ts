@@ -5,7 +5,7 @@ import { ScheduledMessages } from '../models/ScheduledMessages';
 import { executeSendMessage } from '/app/lib/server/methods/sendMessage';
 
 Meteor.startup(() => {
-  // Register the cron job with @rocket.chat/cron
+  // Register the cron job with @rocket.chat/cron it checkes for every 1 minnute
   cronJobs.add('sendScheduledMessages', '*/1 * * * *', async () => {
     console.log('Checking for scheduled messages...');
     const now = new Date();

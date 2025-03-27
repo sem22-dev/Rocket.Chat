@@ -87,33 +87,33 @@ export const formattingButtons: ReadonlyArray<FormattingButton> = [
 			imperativeModal.open({ component: AddLinkComposerActionModal, props: { onConfirm, selectedText, onClose } });
 		},
 	},
-	{
-		label: 'Schedule' as TranslationKey, // Temporary until 'Schedule' is added to translations
-		icon: 'clock',
-		prompt: (composerApi: ComposerAPI) => {
-		  const onClose = () => {
-			imperativeModal.close();
-			composerApi.focus();
-		  };
+	// {
+	// 	label: 'Schedule' as TranslationKey, // Temporary until 'Schedule' is added to translations
+	// 	icon: 'clock',
+	// 	prompt: (composerApi: ComposerAPI) => {
+	// 	  const onClose = () => {
+	// 		imperativeModal.close();
+	// 		composerApi.focus();
+	// 	  };
 	
-		  const onConfirm = (scheduleTime: string) => {
-			flushSync(() => {
-			  onClose();
-			});
-			// We'll handle the scheduling in MessageBox.tsx via onSend
-			const text = composerApi.text ?? '';
-			composerApi.clear();
-			// Trigger a custom event or pass directly via context (handled in MessageBox.tsx)
-			window.dispatchEvent(
-			  new CustomEvent('scheduleMessage', {
-				detail: { text, scheduleTime, tshow: composerApi.tshow, previewUrls: composerApi.previewUrls, isSlashCommandAllowed: composerApi.isSlashCommandAllowed },
-			  })
-			);
-		  };
+	// 	  const onConfirm = (scheduleTime: string) => {
+	// 		flushSync(() => {
+	// 		  onClose();
+	// 		});
+	// 		// We'll handle the scheduling in MessageBox.tsx via onSend
+	// 		const text = composerApi.text ?? '';
+	// 		composerApi.clear();
+	// 		// Trigger a custom event or pass directly via context (handled in MessageBox.tsx)
+	// 		window.dispatchEvent(
+	// 		  new CustomEvent('scheduleMessage', {
+	// 			detail: { text, scheduleTime, tshow: composerApi.tshow, previewUrls: composerApi.previewUrls, isSlashCommandAllowed: composerApi.isSlashCommandAllowed },
+	// 		  })
+	// 		);
+	// 	  };
 	
-		  imperativeModal.open({ component: AddScheduleComposerActionModal, props: { onConfirm, onClose } });
-		},
-	},
+	// 	  imperativeModal.open({ component: AddScheduleComposerActionModal, props: { onConfirm, onClose } });
+	// 	},
+	// },
 	{
 		label: 'KaTeX' as TranslationKey,
 		icon: 'katex',

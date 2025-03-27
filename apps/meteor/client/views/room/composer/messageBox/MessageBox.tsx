@@ -17,6 +17,12 @@ import { useMutation } from '@tanstack/react-query';
 import type { ReactElement, FormEvent, MouseEvent, ClipboardEvent } from 'react';
 import { memo, useRef, useReducer, useCallback, useSyncExternalStore, useEffect } from 'react';
 
+// Add imports for the Schedule action
+import type { ComposerAPI } from '../../../../lib/chats/ChatAPI';
+import { imperativeModal } from '../../../../lib/imperativeModal';
+import { flushSync } from 'react-dom';
+import AddScheduleComposerActionModal from './AddScheduleComposerActionModal'; // Adjust path if needed
+
 import MessageBoxActionsToolbar from './MessageBoxActionsToolbar';
 import MessageBoxFormattingToolbar from './MessageBoxFormattingToolbar';
 import MessageBoxHint from './MessageBoxHint';
@@ -124,7 +130,6 @@ const MessageBox = ({
   const sendOnEnterBehavior = useUserPreference<'normal' | 'alternative' | 'desktop'>('sendOnEnter') || isMobile;
   const sendOnEnter = sendOnEnterBehavior == null || sendOnEnterBehavior === 'normal' || (sendOnEnterBehavior === 'desktop' && !isMobile);
 
-  // Use hooks at the top level of the component
   const dispatchToastMessage = useToastMessageDispatch();
 
   if (!chat) {
@@ -196,7 +201,6 @@ const MessageBox = ({
     async (params: { value: string; tshow?: boolean; previewUrls?: string[]; isSlashCommandAllowed?: boolean; scheduledAt?: string }) => {
       if (params.scheduledAt) {
         console.log(`Message scheduled: "${params.value}" at ${params.scheduledAt}`);
-        // Call a new API to schedule the message instead of sending immediately
         try {
           const response = await fetch('/api/v1/chat.scheduleMessage', {
             method: 'POST',
@@ -215,7 +219,6 @@ const MessageBox = ({
           const result = await response.json();
           console.log('Schedule API response:', result);
 
-          // Show toast message on success
           if (result.success) {
             const formattedTime = formatTime(params.scheduledAt);
             dispatchToastMessage({
@@ -239,10 +242,9 @@ const MessageBox = ({
         onSend?.(params);
       }
     },
-    [onSend, room._id, tmid, dispatchToastMessage], // Add dispatchToastMessage as a dependency
+    [onSend, room._id, tmid, dispatchToastMessage],
   );
 
-  // Listen for the custom scheduleMessage event
   useEffect(() => {
     const handleScheduleMessage = (event: Event) => {
       const { detail } = event as CustomEvent;
@@ -430,6 +432,33 @@ const MessageBox = ({
 
   const shouldPopupPreview = useEnablePopupPreview(popup.filter, popup.option);
 
+  // Define the Schedule action inline
+  const scheduleAction = {
+    label: 'Schedule' as const, // Temporary until 'Schedule' is added to translations
+    icon: 'clock' as const,
+    prompt: (composerApi: ComposerAPI) => {
+      const onClose = () => {
+        imperativeModal.close();
+        composerApi.focus();
+      };
+
+      const onConfirm = (scheduleTime: string) => {
+        flushSync(() => {
+          onClose();
+        });
+        const text = composerApi.text ?? '';
+        composerApi.clear();
+        window.dispatchEvent(
+          new CustomEvent('scheduleMessage', {
+            detail: { text, scheduleTime, tshow: composerApi.tshow, previewUrls: composerApi.previewUrls, isSlashCommandAllowed: composerApi.isSlashCommandAllowed },
+          })
+        );
+      };
+
+      imperativeModal.open({ component: AddScheduleComposerActionModal, props: { onConfirm, onClose } });
+    },
+  };
+
   return (
     <>
       {chat.composer?.quotedMessages && <MessageBoxReplies />}
@@ -512,6 +541,15 @@ const MessageBox = ({
             {canSend && (
               <>
                 {isEditing && <MessageComposerButton onClick={closeEditing}>{t('Cancel')}</MessageComposerButton>}
+                {/* Add the Schedule (clock) icon before the send button */}
+                <MessageComposerAction
+                  aria-label={scheduleAction.label}
+                  icon={scheduleAction.icon}
+                  disabled={!canSend || (!typing && !isEditing)}
+                  onClick={() => scheduleAction.prompt?.(chat.composer!)}
+                  secondary={typing || isEditing}
+                  info={typing || isEditing}
+                />
                 <MessageComposerAction
                   aria-label={t('Send')}
                   icon="send"
