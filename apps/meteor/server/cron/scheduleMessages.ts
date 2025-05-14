@@ -1,11 +1,11 @@
 import { Meteor } from 'meteor/meteor';
 import { cronJobs } from '@rocket.chat/cron';
-import { Messages } from '@rocket.chat/models';
 import { ScheduledMessages } from '../models/ScheduledMessages';
-import { executeSendMessage } from '/app/lib/server/methods/sendMessage';
+import { sendMessage } from '/app/lib/server/functions/sendMessage'; // Import sendMessage directly
+import { Users } from '@rocket.chat/models';
 
 Meteor.startup(() => {
-  // Register the cron job with @rocket.chat/cron it checkes for every 1 minnute
+  // Register the cron job with @rocket.chat/cron, it checks every 1 minute
   cronJobs.add('sendScheduledMessages', '*/1 * * * *', async () => {
     console.log('Checking for scheduled messages...');
     const now = new Date();
@@ -15,36 +15,38 @@ Meteor.startup(() => {
     const scheduledMessages = await ScheduledMessages.find({
       t: 'scheduled_message',
       scheduledAt: { $lte: now },
-    }).fetchAsync(); // Use fetchAsync instead of toArray
+    }).fetchAsync();
 
-    console.log(`Found ${scheduledMessages.length} scheduled messages to process`); // Log the number of messages found
+    console.log(`Found ${scheduledMessages.length} scheduled messages to process`);
 
     for (const message of scheduledMessages) {
-      console.log(`Processing message ${message._id} scheduled for ${message.scheduledAt.toISOString()}`); // Log each message being processed
+      console.log(`Processing message ${message._id} scheduled for ${message.scheduledAt.toISOString()}`);
       try {
-        // Update the message's timestamp to the scheduled time
-        const updatedMessage = {
-          ...message,
-          ts: message.scheduledAt, // Set the timestamp to the scheduled time
-          t: undefined, // Remove the scheduled_message type
-          scheduledAt: undefined, // Remove the scheduledAt field
-          _updatedAt: new Date(), // Update the _updatedAt field
-        };
-
-        // Insert the message into the Messages collection
-        const result = await Messages.insertOne(updatedMessage);
-        const messageId = result.insertedId;
-        const createdMessage = await Messages.findOneById(messageId);
-        if (!createdMessage) {
-          console.error('Failed to find message after insertion:', messageId);
+        // Fetch the user who scheduled the message
+        const user = await Users.findOneById(message.u._id, {
+          projection: { username: 1, type: 1, name: 1 },
+        });
+        if (!user) {
+          console.error(`User ${message.u._id} not found for scheduled message ${message._id}`);
           continue;
         }
 
-        // Send the message to the chat (this will broadcast it to clients)
-        await executeSendMessage(message.u._id, createdMessage);
+        // Construct the message object for sendMessage
+        const messageToSend = {
+          _id: message._id, // Use the scheduled message's ID
+          rid: message.rid, // Room ID
+          tmid: message.tmid, // Thread ID (if applicable)
+          msg: message.msg, // Message text
+          u: { _id: user._id, username: user.username }, // User info
+          ts: message.scheduledAt, // Set the timestamp to the scheduled time
+          _updatedAt: new Date(), // Update the _updatedAt field
+        };
+
+        // Send the message using sendMessage
+        await sendMessage(user, messageToSend, { _id: message.rid }); // Pass a minimal room object with the rid
 
         // Remove the scheduled message from the ScheduledMessages collection
-        await ScheduledMessages.removeAsync({ _id: message._id }); // Use removeAsync
+        await ScheduledMessages.removeAsync({ _id: message._id });
         console.log(`Sent scheduled message ${message._id} at ${now.toISOString()}`);
       } catch (error) {
         console.error(`Failed to send scheduled message ${message._id}:`, error);
