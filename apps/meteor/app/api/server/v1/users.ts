@@ -1,4 +1,4 @@
-import { MeteorError, Team, api } from '@rocket.chat/core-services';
+import { MeteorError, Team, api, Calendar } from '@rocket.chat/core-services';
 import type { IExportOperation, ILoginToken, IPersonalAccessToken, IUser, UserStatus } from '@rocket.chat/core-typings';
 import { Users, Subscriptions } from '@rocket.chat/models';
 import {
@@ -19,7 +19,7 @@ import {
 	isUsersCheckUsernameAvailabilityParamsGET,
 	isUsersSendConfirmationEmailParamsPOST,
 } from '@rocket.chat/rest-typings';
-import { getLoginExpirationInMs } from '@rocket.chat/tools';
+import { getLoginExpirationInMs, wrapExceptions } from '@rocket.chat/tools';
 import { Accounts } from 'meteor/accounts-base';
 import { Match, check } from 'meteor/check';
 import { Meteor } from 'meteor/meteor';
@@ -28,7 +28,9 @@ import type { Filter } from 'mongodb';
 import { generatePersonalAccessTokenOfUser } from '../../../../imports/personal-access-tokens/server/api/methods/generateToken';
 import { regeneratePersonalAccessTokenOfUser } from '../../../../imports/personal-access-tokens/server/api/methods/regenerateToken';
 import { removePersonalAccessTokenOfUser } from '../../../../imports/personal-access-tokens/server/api/methods/removeToken';
+import { UserChangedAuditStore } from '../../../../server/lib/auditServerEvents/userChanged';
 import { i18n } from '../../../../server/lib/i18n';
+import { removeOtherTokens } from '../../../../server/lib/removeOtherTokens';
 import { resetUserE2EEncriptionKey } from '../../../../server/lib/resetUserE2EKey';
 import { sendWelcomeEmail } from '../../../../server/lib/sendWelcomeEmail';
 import { registerUser } from '../../../../server/methods/registerUser';
@@ -80,7 +82,7 @@ API.v1.addRoute(
 			const user = await getUserFromParams(this.queryParams);
 
 			const url = getURL(`/avatar/${user.username}`, { cdn: false, full: true });
-			this.response.setHeader('Location', url);
+			this.response.headers.set('Location', url);
 
 			return {
 				statusCode: 307,
@@ -114,8 +116,14 @@ API.v1.addRoute(
 			if (userData.name && !validateNameChars(userData.name)) {
 				return API.v1.failure('Name contains invalid characters');
 			}
+			const auditStore = new UserChangedAuditStore({
+				_id: this.user._id,
+				ip: this.requestIp,
+				useragent: this.request.headers.get('user-agent') || '',
+				username: this.user.username || '',
+			});
 
-			await saveUser(this.userId, userData);
+			await saveUser(this.userId, userData, { auditStore });
 
 			if (typeof this.bodyParams.data.active !== 'undefined') {
 				const {
@@ -123,9 +131,9 @@ API.v1.addRoute(
 					data: { active },
 					confirmRelinquish,
 				} = this.bodyParams;
-
 				await executeSetUserActiveStatus(this.userId, userId, active, Boolean(confirmRelinquish));
 			}
+
 			const { fields } = await this.parseJsonQuery();
 
 			const user = await Users.findOneById(this.bodyParams.userId, { projection: fields });
@@ -885,7 +893,7 @@ API.v1.addRoute(
 			await Users.enableEmail2FAByUserId(this.userId);
 
 			// When 2FA is enable we logout all other clients
-			const xAuthToken = this.request.headers['x-auth-token'] as string;
+			const xAuthToken = this.request.headers.get('x-auth-token') as string;
 			if (!xAuthToken) {
 				return API.v1.success();
 			}
@@ -1063,7 +1071,7 @@ API.v1.addRoute(
 	{ authRequired: true },
 	{
 		async post() {
-			const xAuthToken = this.request.headers['x-auth-token'] as string;
+			const xAuthToken = this.request.headers.get('x-auth-token') as string;
 
 			if (!xAuthToken) {
 				throw new Meteor.Error('error-parameter-required', 'x-auth-token is required');
@@ -1128,7 +1136,7 @@ API.v1.addRoute(
 	{ authRequired: true },
 	{
 		async post() {
-			return API.v1.success(await Meteor.callAsync('removeOtherTokens'));
+			return API.v1.success(await removeOtherTokens(this.userId, this.connection.id));
 		},
 	},
 );
@@ -1337,6 +1345,8 @@ API.v1.addRoute(
 						user: { status, _id, username, statusText, roles, name },
 						previousStatus: user.status,
 					});
+
+					void wrapExceptions(() => Calendar.cancelUpcomingStatusChanges(user._id)).suppress();
 				} else {
 					throw new Meteor.Error('error-invalid-status', 'Valid status types include online, away, offline, and busy.', {
 						method: 'users.setStatus',
